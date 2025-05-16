@@ -1,25 +1,72 @@
-Alpine_Linux_operating-system-
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#include <string.h>
 
-installation
+#define FILE_NAME "alpine_output.txt"
+#define MSG "Hello from child process using write syscall!\n"
 
-To install Alpine Linux, I used VirtualBox to create a virtual machine. I downloaded the standard ISO from the official Alpine website. After attaching the ISO to the VM, I booted into the Alpine setup. The interface was command-line based, but the instructions were clear. I set up networking with setup-alpine, chose a keyboard layout, selected a mirror, and configured the disk with the guided installer. I used the default settings for most options, including sys disk mode. Then I set the hostname, timezone, and created a user account. Once the installation was complete, I ran reboot, removed the ISO, and booted into my Alpine Linux system for the first time. It was minimal and fast, and the whole experience helped me understand lightweight Linux setups better.
+int main() {
+    int fd;
+    pid_t pid;
+    void *mem;
 
-package management
+    // 1. Create and open a file using system call `open`
+    fd = open(FILE_NAME, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        perror("open");
+        exit(EXIT_FAILURE);
+    }
 
-Alpine Linux uses the apk package manager. It's simple and fast. To update the package index, I used:
+    // 2. Fork a child process
+    pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    }
 
-apk update
+    if (pid == 0) {
+        // Child process
 
-To install a package, the command is:
+        // 3. Write to file using `write`
+        if (write(fd, MSG, strlen(MSG)) < 0) {
+            perror("write");
+            exit(EXIT_FAILURE);
+        }
 
-apk add <package-name>
+        // 4. Use `mmap` to allocate memory and write something
+        mem = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                   MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        if (mem == MAP_FAILED) {
+            perror("mmap");
+            exit(EXIT_FAILURE);
+        }
 
-For example, I installed nano like this:
+        strcpy((char *)mem, "Memory mapped content from child\n");
+        write(STDOUT_FILENO, mem, strlen((char *)mem));
 
-apk add nano
+        // 5. Exit child
+        _exit(0);
+    } else {
+        // Parent process
+        wait(NULL); // 6. Wait for child
 
-I also used apk info to check installed packages and apk del to remove them. Working with apk taught me how minimalist systems handle software installation efficiently.
+        // 7. Use `lseek` and `read` to read the file content
+        lseek(fd, 0, SEEK_SET);
+        char buf[100];
+        int n = read(fd, buf, sizeof(buf)-1);
+        if (n < 0) {
+            perror("read");
+            exit(EXIT_FAILURE);
+        }
+        buf[n] = '\0';
+        printf("Parent read from file:\n%s", buf);
 
-system call
+        close(fd);
+    }
 
-A system call in Alpine Linux works the same way as in other UNIX-like systems. It's how a program interacts with the kernel, like reading files or creating processes. Since Alpine uses musl libc instead of glibc, the system calls are handled slightly differently at the library level, but conceptually they are the same. While exploring system calls, I tried running a simple C program that used open() and write() system calls. This helped me see how applications communicate with the operating system, and I started to understand how Alpine remains small yet powerful by using essential system-level tools.
+    return 0;
+}
